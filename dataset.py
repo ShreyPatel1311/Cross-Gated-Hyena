@@ -76,7 +76,6 @@ def _load_raw(h5: h5py.File, mid: str):
         torch.tensor(g["graph_cat"][:],     dtype=torch.long).squeeze(0),     # (2,)
     )
 
-
 def _node_feats(x_lin: torch.Tensor, x_log: torch.Tensor) -> torch.Tensor:
     """
     (N, 9) → (N, 8): drop x_lin[:,1] (oxidation_state, always 1.0).
@@ -123,10 +122,12 @@ class CrossGatedHyenaDataset(Dataset):
         num_rbf:  int   = 64,
         cutoff:   float = 10.0,
         max_ids:  Optional[int] = None,
+        node_stats: Optional[dict[str, torch.Tensor]] = None,
     ):
         self.h5_path = h5_path
         self.num_rbf = num_rbf
         self.cutoff  = cutoff
+        self.node_stats = node_stats
 
         # ── Build ID list and target map ──────────────────────────────────
         with h5py.File(h5_path, "r") as f:
@@ -170,6 +171,10 @@ class CrossGatedHyenaDataset(Dataset):
             graph_attr    = _graph_feats(graph_abc,                    # (1, 6) → (B, 6)
                                          graph_angles).unsqueeze(0),
         )
+        if self.node_stats is not None:
+            mean = self.node_stats["mean"].to(data.x.device)
+            std  = self.node_stats["std"].to(data.x.device)
+            data.x = (data.x - mean) / std
 
         if mid in self.targets:
             data.y = torch.tensor([self.targets[mid]], dtype=torch.float32)
