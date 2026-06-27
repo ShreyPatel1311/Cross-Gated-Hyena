@@ -50,7 +50,7 @@ from torch.utils.data import Dataset, random_split
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
-from utils.graph_utils import rbf_encode
+from graph_utils import rbf_encode
 
 
 # ---------------------------------------------------------------------------

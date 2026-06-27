@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint as grad_ckpt
 from torch_scatter import scatter
-from utils.graph_utils import rbf_encode, angle_encode
+from graph_utils import rbf_encode, angle_encode
 
 
 # ─────────────────────────────────────────────────────────────────────────────
