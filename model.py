@@ -156,10 +156,13 @@ class LongConv(nn.Module):
         h   = self.filter_mlp(dist_rbf) * m
         seq = seq * m
 
-        H   = torch.fft.rfft(h,   n=k, dim=1)
-        V   = torch.fft.rfft(seq, n=k, dim=1)
-        out = torch.fft.irfft(H * V, n=k, dim=1)
-        return out * m
+        with torch.autocast(device_type=seq.device.type, enabled=False):
+            h32   = h.float()
+            seq32 = seq.float()
+            H   = torch.fft.rfft(h32,   n=k, dim=1)
+            V   = torch.fft.rfft(seq32, n=k, dim=1)
+            out = torch.fft.irfft(H * V, n=k, dim=1)
+        return out.to(seq.dtype) * m
 
 
 # ─────────────────────────────────────────────────────────────────────────────
