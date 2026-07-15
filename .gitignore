@@ -1,0 +1,12 @@
+# Data files (too large for git — download from HuggingFace)
+graphs_data.h5
+materials_tabular.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Training checkpoints
+*.pt
+!node_stats.pt

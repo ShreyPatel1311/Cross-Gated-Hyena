@@ -108,11 +108,19 @@ class CrossGatedHyenaDataset(Dataset):
     Parameters
     ----------
     h5_path       : path to graphs_data.h5
-    csv_path      : path to materials_tabular.csv (band-gap targets).
+    csv_path      : path to materials_tabular.csv (both band_gap and
+                    formation_energy_per_atom columns required).
                     Pass None for inference without targets.
     num_rbf       : Gaussian-RBF basis size for bond-distance encoding
     cutoff        : distance cutoff (Å) for RBF centres
     max_ids       : cap the dataset size (useful for quick testing)
+    augment       : if True, apply inversion-symmetry augmentation in training
+                    mode (flip edge unit vectors with 50 % probability).
+                    Call .eval() to disable during validation/test.
+
+    y shape
+    -------
+    data.y is (2,): [band_gap_eV, formation_energy_per_atom_eV]
     """
 
     def __init__(
@@ -123,27 +131,44 @@ class CrossGatedHyenaDataset(Dataset):
         cutoff:   float = 10.0,
         max_ids:  Optional[int] = None,
         node_stats: Optional[dict[str, torch.Tensor]] = None,
+        augment:  bool  = False,
     ):
-        self.h5_path = h5_path
-        self.num_rbf = num_rbf
-        self.cutoff  = cutoff
+        self.h5_path    = h5_path
+        self.num_rbf    = num_rbf
+        self.cutoff     = cutoff
         self.node_stats = node_stats
+        self.augment    = augment
+        self.training   = True   # set to False for val/test to disable augmentation
 
         # ── Build ID list and target map ──────────────────────────────────
         with h5py.File(h5_path, "r") as f:
             h5_ids = set(f.keys())
 
-        self.targets: dict[str, float] = {}
+        # targets[mid] = (band_gap, formation_energy_per_atom)
+        self.targets: dict[str, tuple[float, float]] = {}
         if csv_path is not None:
-            df            = pd.read_csv(csv_path)[["material_id", "band_gap"]].dropna()
-            self.targets  = dict(zip(df["material_id"], df["band_gap"].astype(float)))
-            valid_ids     = sorted(h5_ids & set(self.targets.keys()))
+            df = pd.read_csv(csv_path)[
+                ["material_id", "band_gap", "formation_energy_per_atom"]
+            ].dropna()
+            self.targets = {
+                row.material_id: (float(row.band_gap), float(row.formation_energy_per_atom))
+                for row in df.itertuples(index=False)
+            }
+            valid_ids = sorted(h5_ids & set(self.targets.keys()))
         else:
             valid_ids = sorted(h5_ids)
 
         if max_ids is not None:
             valid_ids = valid_ids[:max_ids]
         self.ids = valid_ids
+
+    def train(self) -> "CrossGatedHyenaDataset":
+        self.training = True
+        return self
+
+    def eval(self) -> "CrossGatedHyenaDataset":
+        self.training = False
+        return self
 
     # ──────────────────────────────────────────────────────────────────────
 
@@ -176,8 +201,14 @@ class CrossGatedHyenaDataset(Dataset):
             std  = self.node_stats["std"].to(data.x.device)
             data.x = (data.x - mean) / std
 
+        # Change 6: inversion-symmetry augmentation (valid for centrosymmetric crystals)
+        if self.augment and self.training:
+            if torch.rand(1).item() > 0.5:
+                data.edge_unit_vec = -data.edge_unit_vec
+
         if mid in self.targets:
-            data.y = torch.tensor([self.targets[mid]], dtype=torch.float32)
+            bg, fe = self.targets[mid]
+            data.y = torch.tensor([bg, fe], dtype=torch.float32)  # (2,)
 
         return data
 
@@ -219,6 +250,7 @@ class CrossGatedHyenaDataset(Dataset):
         train_frac:   float          = 0.80,
         val_frac:     float          = 0.10,
         seed:         int            = 42,
+        augment:      bool           = False,
     ) -> tuple[DataLoader, DataLoader, DataLoader, "CrossGatedHyenaDataset"]:
         """
         Build train / val / test DataLoaders in one call.
@@ -230,10 +262,13 @@ class CrossGatedHyenaDataset(Dataset):
                       within this total edge count.  Prevents OOM spikes from
                       variable-size graphs and gives better GPU utilisation on
                       small crystals.  Typical value: 20_000 – 40_000.
+        augment     : enable inversion-symmetry augmentation for the training
+                      split only.  val/test always run without augmentation.
 
         Returns (train_loader, val_loader, test_loader, full_dataset).
         """
-        ds    = cls(h5_path, csv_path, num_rbf=num_rbf, cutoff=cutoff, max_ids=max_ids)
+        ds    = cls(h5_path, csv_path, num_rbf=num_rbf, cutoff=cutoff,
+                    max_ids=max_ids, augment=augment)
         n     = len(ds)
         n_tr  = int(train_frac * n)
         n_val = int(val_frac  * n)
@@ -241,6 +276,10 @@ class CrossGatedHyenaDataset(Dataset):
 
         gen              = torch.Generator().manual_seed(seed)
         tr_ds, val_ds, te_ds = random_split(ds, [n_tr, n_val, n_te], generator=gen)
+        # val/test must not augment — switch the shared base dataset to eval mode
+        # before creating val/test loaders; caller should call ds.train() again
+        # before the training loop.
+        # (All three Subsets share the same base ds instance.)
 
         ldr_kw = dict(num_workers=num_workers, pin_memory=True,
                       persistent_workers=(num_workers > 0),
