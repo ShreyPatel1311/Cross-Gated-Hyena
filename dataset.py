@@ -29,7 +29,7 @@ Fields in each Data item
   edge_raw_dist (E,)          raw bond distances in Å
   graph_cat     (1, 2)        crystal system + Bravais class
   graph_attr    (1, 6)        normalised lattice lengths + angles in radians
-  y             (1,)          band-gap target (eV), if csv_path supplied
+  y             (1,)          band-gap target in eV, if csv_path supplied
 
 Usage
 -----
@@ -120,7 +120,7 @@ class CrossGatedHyenaDataset(Dataset):
 
     y shape
     -------
-    data.y is (2,): [band_gap_eV, formation_energy_per_atom_eV]
+    data.y is (1,): [band_gap_eV]
     """
 
     def __init__(
@@ -147,11 +147,9 @@ class CrossGatedHyenaDataset(Dataset):
         # targets[mid] = (band_gap, formation_energy_per_atom)
         self.targets: dict[str, tuple[float, float]] = {}
         if csv_path is not None:
-            df = pd.read_csv(csv_path)[
-                ["material_id", "band_gap", "formation_energy_per_atom"]
-            ].dropna()
+            df = pd.read_csv(csv_path)[["material_id", "band_gap"]].dropna()
             self.targets = {
-                row.material_id: (float(row.band_gap), float(row.formation_energy_per_atom))
+                row.material_id: float(row.band_gap)
                 for row in df.itertuples(index=False)
             }
             valid_ids = sorted(h5_ids & set(self.targets.keys()))
@@ -207,8 +205,8 @@ class CrossGatedHyenaDataset(Dataset):
                 data.edge_unit_vec = -data.edge_unit_vec
 
         if mid in self.targets:
-            bg, fe = self.targets[mid]
-            data.y = torch.tensor([bg, fe], dtype=torch.float32)  # (2,)
+            bg = self.targets[mid]
+            data.y = torch.tensor([bg], dtype=torch.float32)  # (1,)
 
         return data
 

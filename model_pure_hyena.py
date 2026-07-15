@@ -220,24 +220,20 @@ class PureGeometricHyena(nn.Module):
 
         self.gradient_checkpointing = gradient_checkpointing
 
-        # ── Hierarchical coarsening + per-target attention pool ───────────
-        # N atoms → ⌈N/4⌉ cluster super-atoms → (B, node_dim, 2)
-        self.hier_pool = HierarchicalPool(node_dim, num_targets=2, coarsen_factor=4)
+        # ── Hierarchical coarsening + attention pool ──────────────────────
+        # N atoms → ⌈N/4⌉ cluster super-atoms → (B, node_dim, 1)
+        self.hier_pool = HierarchicalPool(node_dim, num_targets=1, coarsen_factor=4)
 
-        # ── Dual readout heads (band gap + formation energy) ──────────────
-        def _head() -> nn.Sequential:
-            return nn.Sequential(
-                nn.LayerNorm(node_dim + node_dim),
-                nn.Linear(node_dim + node_dim, node_dim),
-                nn.SiLU(),
-                nn.Dropout(dropout),
-                nn.Linear(node_dim, node_dim // 2),
-                nn.SiLU(),
-                nn.Linear(node_dim // 2, 1),
-            )
-
-        self.readout_bg = _head()   # band gap  (eV)
-        self.readout_fe = _head()   # formation energy per atom  (eV/atom)
+        # ── Band-gap readout head ─────────────────────────────────────────
+        self.readout_bg = nn.Sequential(
+            nn.LayerNorm(node_dim + node_dim),
+            nn.Linear(node_dim + node_dim, node_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(node_dim, node_dim // 2),
+            nn.SiLU(),
+            nn.Linear(node_dim // 2, 1),
+        )
 
     # ──────────────────────────────────────────────────────────────────────
 
@@ -264,7 +260,7 @@ class PureGeometricHyena(nn.Module):
           .graph_cat, .graph_attr  — crystal-level lattice features
           .batch                   — atom → graph mapping (set by PyG DataLoader)
 
-        Returns (B, 2): [:, 0] band gap (eV), [:, 1] formation energy (eV/atom).
+        Returns (B, 1): band gap in eV.
         """
         N          = data.x.shape[0]
         edge_index = data.edge_index
@@ -299,7 +295,5 @@ class PureGeometricHyena(nn.Module):
         # Step 4: lattice features
         h_lat = self._embed_lattice(data.graph_cat, data.graph_attr)   # (B, node_dim)
 
-        # Step 5: dual-head readout
-        out_bg = self.readout_bg(torch.cat([h_pool[..., 0], h_lat], dim=-1))  # (B, 1)
-        out_fe = self.readout_fe(torch.cat([h_pool[..., 1], h_lat], dim=-1))  # (B, 1)
-        return torch.cat([out_bg, out_fe], dim=-1)                             # (B, 2)
+        # Step 5: band-gap readout
+        return self.readout_bg(torch.cat([h_pool[..., 0], h_lat], dim=-1))    # (B, 1)
