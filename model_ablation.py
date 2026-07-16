@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint as grad_ckpt
-from torch_scatter import scatter, scatter_softmax
+from torch_scatter import scatter
 
 from model import (
     Sin, fftconv, _build_sequences,

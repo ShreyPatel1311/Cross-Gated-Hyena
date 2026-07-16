@@ -3,7 +3,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint as grad_ckpt
-from torch_scatter import scatter, scatter_softmax
+from torch_scatter import scatter
+
+
+def _scatter_softmax(src: torch.Tensor, index: torch.Tensor, dim: int = 0, dim_size: int | None = None) -> torch.Tensor:
+    """Pure-PyTorch scatter softmax — works on CUDA without torch_scatter CUDA kernels.
+    Runs in float32 internally to avoid AMP dtype-promotion mismatches."""
+    if dim_size is None:
+        dim_size = int(index.max().item()) + 1
+    in_dtype = src.dtype
+    src32 = src.float()
+    idx   = index.view(-1, *([1] * (src32.dim() - 1))).expand_as(src32)
+    mx    = torch.full((dim_size, *src32.shape[1:]), float('-inf'), device=src32.device, dtype=torch.float32)
+    mx.scatter_reduce_(0, idx, src32, reduce='amax', include_self=True)
+    exp   = (src32 - mx[index]).exp()
+    s     = torch.zeros(dim_size, *src32.shape[1:], device=src32.device, dtype=torch.float32)
+    s.scatter_add_(0, idx, exp)
+    return (exp / s[index].clamp(min=1e-16)).to(in_dtype)
 from graph_utils import rbf_encode, angle_encode
 
 
@@ -504,7 +520,7 @@ class HierarchicalPool(nn.Module):
         outs = []
         for gate in self.gates:
             score  = gate(h_cluster)                                        # (C, 1)
-            score  = scatter_softmax(score, cluster_batch, dim=0)           # per-graph softmax
+            score  = _scatter_softmax(score, cluster_batch, dim=0)           # per-graph softmax
             pooled = scatter(
                 h_cluster * score, cluster_batch, dim=0,
                 dim_size=num_graphs, reduce="sum",

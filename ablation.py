@@ -28,7 +28,7 @@ if os.path.exists("/content/Files"):                          # Colab runtime
     OUT_CSV    = "/content/ablation_results.csv"
 else:                                                          # local machine
     REPO_DIR   = _here
-    H5_PATH    = os.path.join(os.path.dirname(_here), "DFT-Global", "graphs_data.h5")
+    H5_PATH    = os.path.join(_here, "graphs_data.h5")
     STATS_PATH = os.path.join(_here, "node_stats.pt")
     OUT_CSV    = os.path.join(_here, "ablation_results.csv")
 
