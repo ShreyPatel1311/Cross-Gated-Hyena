@@ -18,13 +18,21 @@ from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-# ── paths (adjust if needed) ──────────────────────────────────────────────
-REPO_DIR   = "/content/Files"
-DATA_DIR   = "/content/Files"
-H5_PATH    = os.path.join(DATA_DIR, "graphs_data.h5")
-CSV_PATH   = os.path.join(DATA_DIR, "materials_tabular.csv")
-STATS_PATH = os.path.join(DATA_DIR, "node_stats.pt")
-OUT_CSV    = "/content/ablation_results.csv"
+# ── paths — auto-detect Colab vs local ────────────────────────────────────
+_here = os.path.dirname(os.path.abspath(__file__))
+
+if os.path.exists("/content/Files"):                          # Colab runtime
+    REPO_DIR   = "/content/Files"
+    H5_PATH    = "/content/Files/graphs_data.h5"
+    STATS_PATH = "/content/Files/node_stats.pt"
+    OUT_CSV    = "/content/ablation_results.csv"
+else:                                                          # local machine
+    REPO_DIR   = _here
+    H5_PATH    = os.path.join(os.path.dirname(_here), "DFT-Global", "graphs_data.h5")
+    STATS_PATH = os.path.join(_here, "node_stats.pt")
+    OUT_CSV    = os.path.join(_here, "ablation_results.csv")
+
+CSV_PATH = os.path.join(REPO_DIR, "materials_tabular.csv")
 
 if REPO_DIR not in sys.path:
     sys.path.insert(0, REPO_DIR)
