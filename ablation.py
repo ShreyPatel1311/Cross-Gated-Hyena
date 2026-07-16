@@ -25,12 +25,12 @@ if os.path.exists("/content/Files"):                          # Colab runtime
     REPO_DIR   = "/content/Files"
     H5_PATH    = "/content/Files/graphs_data.h5"
     STATS_PATH = "/content/Files/node_stats.pt"
-    OUT_CSV    = "/content/ablation_results.csv"
+    OUT_CSV    = f"/content/ablation_results_seed{SEED}.csv"
 else:                                                          # local machine
     REPO_DIR   = _here
     H5_PATH    = os.path.join(_here, "graphs_data.h5")
     STATS_PATH = os.path.join(_here, "node_stats.pt")
-    OUT_CSV    = os.path.join(_here, "ablation_results.csv")
+    OUT_CSV    = os.path.join(_here, f"ablation_results_seed{SEED}.csv")
 
 CSV_PATH = os.path.join(REPO_DIR, "materials_tabular.csv")
 
@@ -41,6 +41,7 @@ if REPO_DIR not in sys.path:
 GATING_TYPES  = ['elementwise', 'film', 'bilinear', 'gru', 'swiglu', 'outer_product', 'cross_attn']
 EPOCHS        = 10
 MAX_IDS       = 10_000
+SEED          = 0       # change to 1, 2, … for each repeat run
 EDGE_BUDGET   = 25_000
 LR            = 1e-3
 WEIGHT_DECAY  = 1e-4
@@ -60,7 +61,13 @@ cap    = (p.major, p.minor) if p else (0, 0)
 AMP_DTYPE       = torch.bfloat16 if cap[0] >= 8 else torch.float16
 USE_AMP         = device.type == "cuda"
 USE_GRAD_SCALER = (AMP_DTYPE == torch.float16) and USE_AMP
-print(f"Device: {device}  AMP: {AMP_DTYPE if USE_AMP else 'off'}")
+import random, numpy as np
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+random.seed(SEED)
+if device.type == "cuda":
+    torch.cuda.manual_seed_all(SEED)
+print(f"Device: {device}  AMP: {AMP_DTYPE if USE_AMP else 'off'}  Seed: {SEED}")
 
 from dataset import CrossGatedHyenaDataset, EdgeBudgetBatchSampler
 from model_ablation import CrossGatedHyena
