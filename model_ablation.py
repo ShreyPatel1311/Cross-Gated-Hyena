@@ -5,11 +5,13 @@ CrossGatedHyena with a swappable cross-gating mechanism for ablation.
 
 Gating types
 ------------
-  'elementwise' : delta_v = delta_v  ⊙  proj(scatter_mean(delta_e))
-  'film'        : delta_v = γ ⊙ delta_v + β   (γ, β from other stream)
-  'bilinear'    : delta_v = proj_left(delta_v)  ⊙  proj_right(scatter_mean(delta_e))
-  'gru'         : delta_v = z ⊙ delta_v + (1−z) ⊙ r   (GRU-style blend)
-  'swiglu'      : delta_v = proj(delta_v) ⊙ SiLU(proj(scatter_mean(delta_e)))
+  'elementwise'   : delta_v = delta_v  ⊙  proj(scatter_mean(delta_e))
+  'film'          : delta_v = γ ⊙ delta_v + β   (γ, β from other stream)
+  'bilinear'      : delta_v = proj_left(delta_v)  ⊙  proj_right(scatter_mean(delta_e))
+  'gru'           : delta_v = z ⊙ delta_v + (1−z) ⊙ r   (GRU-style blend)
+  'swiglu'        : delta_v = proj(delta_v) ⊙ SiLU(proj(scatter_mean(delta_e)))
+  'outer_product' : delta_v = out_proj(proj(delta_v) ⊗ proj(scatter_mean(delta_e)))
+  'cross_attn'    : delta_v = multi-head cross-attention, x1 as Q, x2 as K/V
 
 Everything else (LongConv, HierarchicalPool, residuals, readout) is
 identical across all variants so results are directly comparable.
@@ -89,12 +91,55 @@ class SwiGLUGate(nn.Module):
         return self.gate(x1) * F.silu(self.cond(x2))
 
 
+class OuterProductGate(nn.Module):
+    """Low-rank outer product: models all pairwise feature interactions.
+    Both streams are projected to rank r, outer-producted, then projected back.
+    Inspired by AlphaFold2 triangle multiplicative updates."""
+    def __init__(self, dim1: int, dim2: int, rank: int = 16):
+        super().__init__()
+        self.proj1 = nn.Linear(dim1, rank, bias=False)
+        self.proj2 = nn.Linear(dim2, rank, bias=False)
+        self.out   = nn.Linear(rank * rank, dim1)
+
+    def forward(self, x1, x2):
+        a     = self.proj1(x1)                          # (N, r)
+        b     = self.proj2(x2)                          # (N, r)
+        outer = (a.unsqueeze(-1) * b.unsqueeze(-2))     # (N, r, r)
+        return self.out(outer.flatten(1))               # (N, dim1)
+
+
+class CrossAttentionGate(nn.Module):
+    """Multi-head cross-attention: x1 as query, x2 as key and value.
+    Per-node feature-wise attention — each head produces a scalar gate
+    from the dot-product of Q and K, then scales V accordingly."""
+    def __init__(self, dim1: int, dim2: int, num_heads: int = 4):
+        super().__init__()
+        assert dim1 % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim  = dim1 // num_heads
+        self.scale     = self.head_dim ** -0.5
+        self.q_proj    = nn.Linear(dim1, dim1, bias=False)
+        self.k_proj    = nn.Linear(dim2, dim1, bias=False)
+        self.v_proj    = nn.Linear(dim2, dim1, bias=False)
+        self.out_proj  = nn.Linear(dim1, dim1, bias=False)
+
+    def forward(self, x1, x2):
+        N = x1.shape[0]
+        q = self.q_proj(x1).view(N, self.num_heads, self.head_dim)
+        k = self.k_proj(x2).view(N, self.num_heads, self.head_dim)
+        v = self.v_proj(x2).view(N, self.num_heads, self.head_dim)
+        attn = torch.sigmoid((q * k).sum(-1, keepdim=True) * self.scale)  # (N, H, 1)
+        return self.out_proj((attn * v).reshape(N, -1))
+
+
 _GATE_CLASSES = {
-    'elementwise': ElementwiseGate,
-    'film':        FiLMGate,
-    'bilinear':    BilinearGate,
-    'gru':         GRUGate,
-    'swiglu':      SwiGLUGate,
+    'elementwise':   ElementwiseGate,
+    'film':          FiLMGate,
+    'bilinear':      BilinearGate,
+    'gru':           GRUGate,
+    'swiglu':        SwiGLUGate,
+    'outer_product': OuterProductGate,
+    'cross_attn':    CrossAttentionGate,
 }
 
 

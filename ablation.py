@@ -38,7 +38,7 @@ if REPO_DIR not in sys.path:
     sys.path.insert(0, REPO_DIR)
 
 # ── ablation config ────────────────────────────────────────────────────────
-GATING_TYPES  = ['elementwise', 'film', 'bilinear', 'gru', 'swiglu']
+GATING_TYPES  = ['elementwise', 'film', 'bilinear', 'gru', 'swiglu', 'outer_product', 'cross_attn']
 EPOCHS        = 10
 MAX_IDS       = 10_000
 EDGE_BUDGET   = 25_000
